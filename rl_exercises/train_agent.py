@@ -22,6 +22,7 @@ from rl_exercises.agent.buffer import SimpleBuffer
 from rl_exercises.environments import MarsRover
 from rl_exercises.week_2.policy_iteration import PolicyIteration
 from rl_exercises.week_2.value_iteration import ValueIteration
+from rl_exercises.week_3 import EpsilonGreedyPolicy, TDAgent
 
 # from rl_exercises.week_4 import EpsilonGreedyPolicy as TabularEpsilonGreedyPolicy
 # from rl_exercises.week_4 import SARSAAgent
@@ -59,14 +60,28 @@ def train(cfg: DictConfig) -> float:
         return train_sb3(env, cfg)
     elif cfg.agent == "random":
         agent = RandomAgent(env)
+    elif cfg.agent in {"policy_iteration", "value_iteration"}:
+        agent_cls = get_class(f"rl_exercises.week_2.{cfg.agent}.{cfg.agent_class}")
+        agent = agent_cls(env=env, seed=cfg.seed, **cfg.agent_kwargs)
+    elif cfg.agent in {"sarsa", "qlearning"}:
+        agent_kwargs = dict(OmegaConf.to_container(cfg.agent_kwargs, resolve=True))
+        epsilon = agent_kwargs.pop("epsilon", 0.1)
+        policy = EpsilonGreedyPolicy(env=env, epsilon=epsilon, seed=cfg.seed)
+        agent = TDAgent(env=env, policy=policy, algorithm=cfg.agent, **agent_kwargs)
     else:
-        # TODO: add your agent options here
         raise NotImplementedError
 
     buffer_cls = eval(cfg.buffer_cls)
     buffer = buffer_cls(**cfg.buffer_kwargs)
     state, info = env.reset(seed=cfg.seed)
-    train_reward_buffer = {"steps": [], "train_rewards": []}
+    train_reward_buffer = {
+        "steps": [],
+        "train_states": [],
+        "train_actions": [],
+        "train_next_states": [],
+        "train_done": [],
+        "train_rewards": [],
+    }
     eval_reward_buffer = {"eval_steps": [], "eval_rewards": []}
 
     for step in range(int(cfg.training_steps)):
@@ -75,6 +90,10 @@ def train(cfg: DictConfig) -> float:
 
         buffer.add(state, action, reward, next_state, (truncated or terminated), info)
         train_reward_buffer["steps"].append(step)
+        train_reward_buffer["train_states"].append(state)
+        train_reward_buffer["train_actions"].append(action)
+        train_reward_buffer["train_next_states"].append(next_state)
+        train_reward_buffer["train_done"].append(truncated or terminated)
         train_reward_buffer["train_rewards"].append(reward)
 
         if len(buffer) > cfg.batch_size or (
